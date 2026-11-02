@@ -1,0 +1,59 @@
+name: Extract project ZIP into repository
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '*.zip'
+      - '.github/workflows/extract-project.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Find and extract project archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No ZIP archive found in the repository root."
+            exit 1
+          fi
+
+          mkdir -p /tmp/project-archive
+          unzip -q "$ZIP_FILE" -d /tmp/project-archive
+
+          PACKAGE_FILE="$(find /tmp/project-archive -type f -name package.json -not -path '*/node_modules/*' -print -quit)"
+          if [ -z "$PACKAGE_FILE" ]; then
+            echo "Could not find package.json inside the ZIP archive."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
+          rsync -a \
+            --exclude='/.git/' \
+            --exclude='/.github/' \
+            --exclude='/node_modules/' \
+            --exclude='/dist/' \
+            "$PROJECT_DIR/" ./
+
+      - name: Commit extracted source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+          else
+            git commit -m "Extract game project from ZIP"
+            git push
+          fi
